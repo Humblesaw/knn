@@ -3,8 +3,9 @@ name = "knn"
 version = "0.1.0"
 description = "Reinforcement learning for flight control."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
-    "flightgear-python>=2.0.3",
+    "gymnasium>=1.2.3",
+    "gymnasium-jsbsim>=0.1.1",
     "ruff>=0.15.5",
 ]

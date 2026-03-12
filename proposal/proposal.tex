@@ -1,0 +1,29 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+
+\title{Reinforcement learning for flight control}
+\author{Kušnírik, Ondrej\\
+        \texttt{xkusni02@stud.fit.vutbr.cz}
+        \and
+        Greš, Daniel\\
+        \texttt{xgresd00@stud.fit.vutbr.cz}
+        \and
+        Kvaček, David\\
+        \texttt{xkvace00@stud.fit.vutbr.cz}
+        }
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+The aim of this work is to train an adaptive deep neural network that is going to be able to control various types of fixed-wing planes without the knowledge of the plane's parameters upfront.
+The simulation will be handled by the JSBSim Flight Dynamics Model which lies at the core of FlightGear, an open-source flight simulator.
+We would like to first try standard reinforcement learning methods which others have used successfully for this type of problem to create a~base for further evaluation of our own work (e.g. DDPG --~Deep Deterministic Policy Gradient\footnote{https://link.springer.com/article/10.1007/s11071-023-08725-y} based agent).
+As for the environment, we would like to utilize Gymnasium, OpenAI's Python library, which is being used extensively for reinforcement learning tasks.
+We will be building upon the work of Mr. Galego\footnote{https://github.com/JGalego/gymnasium-jsbsim/tree/master} who has already connected the FlightGear to the Gymnasium environment.
+Mr. Galego tried to train the PPO RL agent for the task of flying with constant heading and altitude; however, the agent seems to develop a~rather strange behavior in which the plane shakes during the flight excessively.
+Our contribution will be to understand the principles of the reward function and the RL method used and possibly tweak them to achieve better results.
+The solution is divided into phases, from the launch of the JSBSim simulator within the Gymnasium library, through the definition of the 3D waypoint system, modification of the observation space relative to the next point, and modification of the reward function to motivate the fastest possible flight path, to experiments with more advanced algorithms, verification of the agent's ability to control a flying device, and final measurement of the flight path success, including performance comparison\footnote{https://github.com/Humblesaw/knn}.
+
+\end{document}

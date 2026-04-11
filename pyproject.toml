@@ -7,5 +7,8 @@ requires-python = ">=3.13"
 dependencies = [
     "gymnasium>=1.2.3",
     "gymnasium-jsbsim>=0.1.1",
+    "ipykernel>=7.2.0",
     "ruff>=0.15.5",
+    "stable-baselines3>=2.8.0",
+    "tensorboard>=2.20.0",
 ]

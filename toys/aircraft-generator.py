@@ -1,17 +1,36 @@
 """
-Aircraft Generator for JSBSim / Gymnasium-JSBSim.
+==============================================================================
+AIRCRAFT GENERATOR & DOMAIN RANDOMIZATION
+==============================================================================
+This module implements Domain Randomization for JSBSim environments. 
+It generates aircraft variants by scaling physical properties, forcing the 
+agent to learn generalized flight control instead of memorizing one model.
 
-Parametrically generates aircraft variants derived from the Cessna C172P.
-Physically consistent scaling: weight, wings, engine, moments of inertia.
+QUICK START GUIDE:
 
-Usage:
-    import gymnasium as gym
-    from aircraft_generator import AircraftGenerator, RandomAircraftWrapper
- 
-    base_env = gym.make("JSBSim-HeadingControlTask-Cessna172P-Shaping.STANDARD-NoFG-v0")
-    gen = AircraftGenerator()
-    env = RandomAircraftWrapper(base_env, gen)
-    obs, info = env.reset()
+1. IMPORT:
+   from aircraft_generator import AircraftGenerator, RandomAircraftWrapper
+
+2. ENVIRONMENT INTEGRATION (inside training script):
+   def make_env(seed=0):
+       # A) Create base JSBSim environment
+       env = gym.make("JSBSim-HeadingControlTask-Cessna172P-Shaping.STANDARD-NoFG-v0")
+       
+       # B) Wrap with Generator (MUST BE FIRST)
+       gen = AircraftGenerator()
+       env = RandomAircraftWrapper(env, generator=gen, randomize_every_reset=True, seed=seed)
+       
+       # C) Wrap with logic
+       env = Stage1LevelHeading(env)
+       return env
+
+3. TRAIN:
+   model = PPO("MlpPolicy", env=make_env(), verbose=1)
+   model.learn(total_timesteps=1_000_000)
+
+NOTE: This module is thread-safe and supports parallel training (SubprocVecEnv) 
+by using isolated temporary directories for each environment instance.
+==============================================================================
 """
 
 import copy
@@ -347,43 +366,31 @@ class RandomAircraftWrapper(gym.Wrapper):
 
 
 if __name__ == "__main__":
-    import gymnasium_jsbsim  # noqa: F401
-    
-    # 1. Base JSBSim environment
-    base_env = gym.make("JSBSim-HeadingControlTask-Cessna172P-Shaping.STANDARD-NoFG-v0")
-    
-    # 2. Add generator logic via our Wrapper
+    print("=== JSBSim Aircraft Generator: Native Integration Test ===")
+
+    # initialize generator and wrapper
     gen = AircraftGenerator()
-    env = RandomAircraftWrapper(base_env, gen, randomize_every_reset=True)
 
-    print(f"Observation space: {env.observation_space}")
-    print(f"Action space: {env.action_space}")
-    
-    obs, info = env.reset()
-    print(f"Shape: {obs.shape} | aircraft: {env.current_params.summary()}")
-    
-    for i in range(5):
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-        print(f"Step {i + 1}: reward={reward:.4f}, done={terminated or truncated}")
-        if terminated or truncated:
-            break
+    # using a dummy environment check if standalone, or just wrap a standard one
+    try:
+        base_env = gym.make("JSBSim-HeadingControlTask-Cessna172P-Shaping.STANDARD-NoFG-v0")
+        env = RandomAircraftWrapper(base_env, generator=gen, randomize_every_reset=True)
 
-    obs, info = env.reset()
-    print(f"Aircraft: {env.current_params.summary()}")
-    
-    env.close()
+        # --- EPISODE 1 ---
+        obs, info = env.reset()
+        print(f"\n[Episode {env._episode_count}] aircraft generated:")
+        print(f" >> {env.current_params.summary()}")
 
-    # Possible usage in curriculum.py:
-    # ================================
-    # from aircraft_generator import AircraftGenerator, RandomAircraftWrapper
-    #
-    # def make_env(gui: bool = False):
-    #     env_name = "JSBSim-HeadingControlTask-Cessna172P-Shaping.STANDARD-FG-v0" if gui else "JSBSim-HeadingControlTask-Cessna172P-Shaping.STANDARD-NoFG-v0"
-    #     base_env = gym.make(env_name)
-    #
-    #     gen = AircraftGenerator()
-    #     base_env = RandomAircraftWrapper(base_env, gen)
-    #
-    #     if STAGE == 1:
-    #         return Stage1LevelHeading(base_env)
+        for _ in range(3):
+            env.step(env.action_space.sample())
+
+        # --- EPISODE 2 (reset trigger) ---
+        obs, info = env.reset()
+        print(f"\n[Episode {env._episode_count}] randomization check (new parameters):")
+        print(f" >> {env.current_params.summary()}")
+
+        env.close()
+
+    except Exception as e:
+        print(f"\n[Test Error]: {e}")
+        print("Note: Make sure gymnasium-jsbsim is installed for this test.")

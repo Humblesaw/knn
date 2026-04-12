@@ -7,7 +7,7 @@ import gymnasium as gym
 import gymnasium_jsbsim  # noqa: F401
 
 # Define the maximum number of steps to run
-MAX_STEPS = 100
+MAX_STEPS = 100000
 
 # Create the environment
 env = gym.make("JSBSim-HeadingControlTask-Cessna172P-Shaping.STANDARD-FG-v0")

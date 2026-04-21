@@ -3,6 +3,9 @@ import math
 import random
 import types
 import warnings
+import socket
+import subprocess
+import time
 from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import Dict, NamedTuple, Optional, Sequence, Tuple, List
@@ -280,3 +283,161 @@ class WaypointTask(FlightTask):
             self.last_agent_reward,
             self.last_assessment_reward,
         )
+
+class WaypointVisualiser:
+    """
+    Class for visualising aircraft using the FlightGear simulator.
+
+    This visualiser launches FlightGear and (by default) waits for it to
+    launch. A Figure is also displayed (by creating its own FigureVisualiser)
+    which is used to display the agent's actions.
+    """
+
+    def __init__(
+        self, sim: Simulation, block_until_loaded=True
+    ):
+        """
+        Launches FlightGear in subprocess and starts figure for plotting actions.
+
+        :param sim: Simulation that will be visualised
+        :param aircraft: Aircraft to be loaded in FlightGear for visualisation
+        :param print_props: collection of Propertys to be printed to Figure
+        :param block_until_loaded: visualiser will block until it detects that
+            FlightGear has loaded if True.
+        """
+        self.configure_simulation_output(sim)
+        # self.print_props = print_props
+        # Note: subprocess is managed manually (not with context manager)
+        # Because it needs to stay alive for the visualiser's lifetime
+        # And is explicitly closed in close() method
+        self.flightgear_process = self._launch_flightgear(sim.get_aircraft())
+        # self.figure = FigureVisualiser(sim, print_props)
+        if block_until_loaded:
+            time.sleep(20)
+            # self._block_until_flightgear_loaded()
+
+        self.host = "127.0.0.1"
+        self.port = 5555
+        self.model_path = "Models/Weather/balloon.ac"
+
+    def send_command(self, cmd: str):
+        """Sends a raw command to the FlightGear telnet server."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1.0)
+                s.connect((self.host, self.port))
+                s.recv(1024)
+                s.sendall((cmd + '\r\n').encode('utf-8'))
+                response = s.recv(1024).decode('utf-8').strip()
+                print(f"Sent: {cmd} | FG Response: {response}")
+        except Exception as e:
+            # FlightGear might not be running yet, which is fine during training
+            print(f"Error: {e}")
+
+    def draw_waypoints(self, waypoints):
+        """Injects 3D models into FlightGear at the waypoint coordinates."""
+        # We start at index 100 to avoid overwriting default FG models
+        base_idx = 100 
+        
+        for i, (lat, lon, alt) in enumerate(waypoints):
+            model_idx = base_idx + i
+            prefix = f"/models/model[{model_idx}]"
+            
+            # Send the properties to FlightGear to spawn the object
+            commands = [
+                f"set {prefix}/path {self.model_path}",
+                f"set {prefix}/latitude-deg-m {lat}",
+                f"set {prefix}/longitude-deg-m {lon}",
+                f"set {prefix}/elevation-ft {alt}",
+                f"set {prefix}/pitch-deg 0",
+                f"set {prefix}/roll-deg 0",
+                f"set {prefix}/heading-deg 0",
+                f"set {prefix}/load 1"  # This tells FG to actually render it
+            ]
+            
+            for cmd in commands:
+                self.send_command(cmd)
+
+    def clear_waypoints(self, num_waypoints):
+        """Removes the models from the sky."""
+        base_idx = 100
+        for i in range(num_waypoints):
+            # Unloading the model removes it from the screen
+            self.send_command(f"set /models/model[{base_idx + i}]/load 0")
+
+    def plot(self, sim: Simulation) -> None:
+        """
+        Updates a 3D plot of agent actions.
+        """
+        # plot nothing for the time being
+        # self.figure.plot(sim)
+
+    @staticmethod
+    def _launch_flightgear(aircraft: Aircraft):
+        """Launch FlightGear subprocess for visualization."""
+        cmd_line_args = WaypointVisualiser._create_cmd_line_args(
+            aircraft.flightgear_id
+        )
+        # Subprocess is not used with context manager because it needs to persist
+        # And is managed manually via close() method
+
+        flightgear_process = subprocess.Popen(
+            cmd_line_args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        return flightgear_process
+
+    def configure_simulation_output(self, sim: Simulation):
+        """Configure simulation for FlightGear output."""
+        sim.enable_flightgear_output()
+        sim.set_simulation_time_factor(constants.FG_TIME_FACTOR)
+
+    @staticmethod
+    def _create_cmd_line_args(aircraft_id: str):
+        # FlightGear doesn't have a 172X model, use the P instead
+        if aircraft_id == "c172x":
+            aircraft_id = "c172p"
+
+        flightgear_cmd = "fgfs"
+        aircraft_arg = f"--aircraft={aircraft_id}"
+        flight_model_arg = (
+            "--native-fdm=" + f"{constants.FG_TYPE},"
+            f"{constants.FG_DIRECTION},"
+            f"{constants.FG_RATE},"
+            f"{constants.FG_SERVER},"
+            f"{constants.FG_PORT},"
+            f"{constants.FG_PROTOCOL}"
+        )
+        flight_model_type_arg = "--fdm=" + "external"
+        disable_ai_arg = "--disable-ai-traffic"
+        disable_live_weather_arg = "--disable-real-weather-fetch"
+        time_of_day_arg = "--timeofday=noon"
+        return (
+            flightgear_cmd,
+            aircraft_arg,
+            flight_model_arg,
+            flight_model_type_arg,
+            disable_ai_arg,
+            disable_live_weather_arg,
+            time_of_day_arg,
+            "--disable-clouds",
+            "--disable-clouds3d",
+            "--fog-disable",
+            "--telnet=socket,in,10,,5555,tcp",
+        )
+
+    def _block_until_flightgear_loaded(self):
+        """Wait until FlightGear has finished loading."""
+        while True:
+            msg_out = self.flightgear_process.stdout.readline().decode()
+            if constants.FG_LOADED_MESSAGE in msg_out:
+                break
+            time.sleep(0.001)
+
+    def close(self):
+        """Close FlightGear and figure visualiser."""
+        if self.flightgear_process:
+            self.flightgear_process.kill()
+            timeout_secs = 1
+            self.flightgear_process.wait(timeout=timeout_secs)

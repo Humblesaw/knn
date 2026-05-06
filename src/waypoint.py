@@ -21,6 +21,7 @@ from gymnasium_jsbsim.properties import BoundedProperty, Property
 from gymnasium_jsbsim.rewards import RewardStub
 from gymnasium_jsbsim.simulation import Simulation
 from gymnasium_jsbsim.tasks import FlightTask
+import waypointsgen
 
 class MinMaxObservationWrapper(gym.ObservationWrapper):
     def __init__(self, env):
@@ -46,26 +47,48 @@ class Reward:
     def assessment_reward(self): return self._assessment_reward
 
 class WaypointAssessor(Assessor):
-    """Calculates rewards based on distance to the active waypoint."""
+    """Calculates rewards based on a Bell Curve (Gaussian) distance distribution."""
     
-    def __init__(self, hit_bonus: float = 100.0, shaping_multiplier: float = 0.1):
+    def __init__(self, hit_bonus: float = 400.0):
         self.hit_bonus = hit_bonus
-        self.shaping_multiplier = shaping_multiplier
+        
+        # --- BELL CURVE PARAMETERS ---
+        self.base_multiplier = 0.01  # Tiny reward when far away
+        self.peak_multiplier = 0.20  # Massive reward spike when close
+        self.spread_ft = 2000.0      # How wide the bell curve is (starts pulling hard at 2000ft)
 
     def assess(self, state: Tuple, last_state: Tuple, is_terminal: bool) -> Reward:
         if last_state is None:
             return Reward(0.0, 0.0)
 
-        # get custom_wp_dist which is right after base_state_variables
-        current_dist = state[len(FlightTask.base_state_variables)]
-        last_dist = last_state[len(FlightTask.base_state_variables)]
-
-        # Dense Reward: Positive if we moved closer, negative if we moved away
-        delta_dist = last_dist - current_dist
-        step_reward = delta_dist * self.shaping_multiplier
+        # Grab the custom variables from the state array
+        base_idx = len(FlightTask.base_state_variables)
+        current_dist = state[base_idx]
+        last_dist = last_state[base_idx]
         
-        # We handle the big hit_bonus inside the Task itself when the list pops,
-        # but the shaping (breadcrumb) reward is calculated here every step.
+        current_heading_err = state[base_idx + 1]
+        current_elev_err = state[base_idx + 2]
+
+        # --- THE BELL CURVE MATH ---
+        # 1. Calculate where we are on the curve: e^(-(distance^2) / (2 * spread^2))
+        # This outputs 1.0 if distance is 0, and approaches 0.0 as distance grows.
+        bell_curve_value = math.exp(-(current_dist**2) / (2 * (self.spread_ft**2)))
+        
+        # 2. Calculate the dynamic multiplier for this exact frame
+        dynamic_multiplier = self.base_multiplier + (self.peak_multiplier * bell_curve_value)
+
+        # 3. Apply the dynamic multiplier to the distance covered
+        delta_dist = last_dist - current_dist
+        step_reward = delta_dist * dynamic_multiplier
+        
+        # --- PENALTIES ---
+        # TIME PENALTY: Lose points every step to stop infinite circling
+        step_reward -= 0.5
+        
+        # ALIGNMENT PENALTY: Lose points if the nose isn't pointing at the waypoint
+        alignment_penalty = (abs(current_heading_err) + abs(current_elev_err)) * 0.5
+        step_reward -= alignment_penalty
+
         return Reward(step_reward, step_reward)
 
 class WaypointTask(FlightTask):
@@ -93,7 +116,7 @@ class WaypointTask(FlightTask):
                 aircraft: Aircraft,
                 assessor: WaypointAssessor,
                 waypoints: List[Tuple[float, float, float]],
-                hit_radius_ft: float = 500.0,
+                hit_radius_ft: float = 400.0,
                 max_steps: int = 1000,
                 debug: bool = False):
     
@@ -135,13 +158,31 @@ class WaypointTask(FlightTask):
 
     def _new_episode_init(self, sim: 'Simulation') -> None:
         """Reset waypoint list on new episode."""
-        print("NEW EPISODE BEGINS")
         super()._new_episode_init(sim)
+        
+        # Set standard engine controls
         sim.set_throttle_mixture_controls(constants.THROTTLE_CMD, constants.MIXTURE_CMD)
+        
+        # --- THE FIX: Pre-trim the nose down ---
+        # This counteracts the massive lift generated at cruise speed, 
+        # allowing the agent's neutral (0.0) stick output to fly perfectly level!
+        sim.jsbsim["fcs/pitch-trim-cmd-norm"] = -0.15
+        
+        # Generate dynamic route based on current position
+        generator = waypointsgen.RouteGenerator(
+            start_lat=sim[prp.lat_geod_deg], 
+            start_lon=sim[prp.lng_geoc_deg], 
+            start_alt=sim[prp.altitude_sl_ft],
+            start_heading_deg=sim[prp.heading_deg]
+        )
+        
+        current_difficulty = getattr(self, 'curriculum_difficulty', 0.0) 
+        
+        self.original_waypoints = generator.generate_route(num_waypoints=3, difficulty=current_difficulty)
         self.active_waypoints = self.original_waypoints.copy()
+        
         self.waypoints_cleared = 0
         self.just_hit_waypoint = False
-        # reset step counter
         self.current_step = 0
 
     def _update_custom_properties(self, sim: 'Simulation') -> None:
@@ -210,7 +251,7 @@ class WaypointTask(FlightTask):
         sim[self.custom_wp_elev_err] = pitch_error
 
     def _is_terminal(self, sim: 'Simulation') -> bool:
-        """Episode ends if all waypoints are hit or plane crashes."""
+        """Episode ends if all waypoints are hit, plane crashes, or it flies out of bounds."""
         if not self.active_waypoints:
             return True # Success!
             
@@ -221,19 +262,28 @@ class WaypointTask(FlightTask):
         roll_rad = abs(sim[prp.roll_rad])
         pitch_rad = abs(sim[prp.pitch_rad])
         
-        # 1.5 radians is about 85 degrees. 
-        # If the Cessna is banking or pitching this hard, it's out of control.
-        if roll_rad > 1.5 or pitch_rad > 1.5:
+        # Spinning out of control
+        if roll_rad > 0.5 or pitch_rad > 0.5:
+            return True
+            
+        # NEW: Out of Bounds Check
+        # Waypoints spawn ~10,000 ft away. If it gets 25,000 ft away, it is flying in the wrong direction.
+        dist_ft = sim[self.custom_wp_dist]
+        if dist_ft > 25000.0:
             return True
             
         return False
 
     def _reward_terminal_override(self, reward: Reward, sim: 'Simulation') -> Reward:
-        """Apply sparse rewards for hits, completion, or failure."""
+        """Apply sparse rewards for hits, completion, failure, or flying away."""
         agent_rew = reward.agent_reward()
         
-        # Large penalty for crashing
-        if sim[prp.altitude_sl_ft] <= 0.0:
+        # Penalty for hitting the ground OR losing control
+        if sim[prp.altitude_sl_ft] <= 0.0 or abs(sim[prp.roll_rad]) > 0.5 or abs(sim[prp.pitch_rad]) > 0.5:
+            agent_rew -= 1000.0
+            
+        # NEW: Penalty for flying out of bounds
+        elif sim[self.custom_wp_dist] > 25000.0:
             agent_rew -= 1000.0
             
         # Massive bonus for clearing the whole course
@@ -243,8 +293,20 @@ class WaypointTask(FlightTask):
         return Reward(agent_rew, reward.assessment_reward())
         
     def task_step(self, sim: 'Simulation', action: Sequence[float], sim_steps: int) -> Tuple[np.ndarray, float, bool, bool, Dict]:
-        """Override to inject the waypoint hit bonus into the step reward."""
-        state, reward, terminated, truncated, info = super().task_step(sim, action, sim_steps)
+        """Override to inject the waypoint hit bonus, and manually trim the elevator."""
+        
+        # --- THE FOOLPROOF TRIM FIX ---
+        # action[0] = aileron, action[1] = elevator, action[2] = rudder
+        modified_action = list(action)
+        
+        # Push the stick forward by 15% to counteract cruise lift
+        modified_action[1] -= 0.15 
+        
+        # Clamp it to make sure we don't accidentally send a value outside [-1.0, 1.0]
+        modified_action[1] = max(-1.0, min(1.0, modified_action[1]))
+        
+        # Pass our modified, level-flying action to the physics engine instead
+        state, reward, terminated, truncated, info = super().task_step(sim, modified_action, sim_steps)
         
         # If we just popped a waypoint during _update_custom_properties, add the sparse bonus
         if self.just_hit_waypoint:
@@ -257,17 +319,12 @@ class WaypointTask(FlightTask):
         self.current_step += 1
         if self.current_step >= self.max_steps:
             truncated = True
-            # Optional: You can subtract a penalty from 'reward' here 
-            # if you want to actively punish the agent for being too slow.
 
         state_values = [sim[prop] for prop in self.state_variables]
 
         # --- DEBUG START ---
         if any(math.isnan(v) or math.isinf(v) for v in state_values):
             print("!!! NaN/Inf detected in State !!!")
-            for name, val in zip(self.State._fields, state_values):
-                print(f"{name}: {val}")
-
             # Severe penalty for "disintegrating" the aircraft
             reward = -2000.0 
             terminated = True

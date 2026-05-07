@@ -15,7 +15,7 @@ from waypointsgen import RouteGenerator
 dummy_waypoints = [(0.0, 0.0, 5000)]
 
 def WaypointTaskFactory(*args, **kwargs):
-    my_assessor = WaypointAssessor(hit_bonus=100.0)
+    my_assessor = WaypointAssessor()
     return WaypointTask(
         cessna172P,
         my_assessor,

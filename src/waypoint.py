@@ -49,7 +49,7 @@ class Reward:
 class WaypointAssessor(Assessor):
     """Calculates rewards based on a Bell Curve (Gaussian) distance distribution."""
     
-    def __init__(self, hit_bonus: float = 400.0):
+    def __init__(self, hit_bonus: float = 1000.0):
         self.hit_bonus = hit_bonus
         
         # --- BELL CURVE PARAMETERS ---
@@ -351,7 +351,7 @@ class WaypointVisualiser:
     """
 
     def __init__(
-        self, sim: Simulation, block_until_loaded=True
+        self, sim: Simulation, model_path, block_until_loaded=True
     ):
         """
         Launches FlightGear in subprocess and starts figure for plotting actions.
@@ -375,7 +375,7 @@ class WaypointVisualiser:
 
         self.host = "127.0.0.1"
         self.port = 5555
-        self.model_path = "Models/Weather/balloon.ac"
+        self.model_path = model_path
 
     def send_command(self, cmd: str):
         """Sends a raw command to the FlightGear telnet server."""
@@ -383,7 +383,6 @@ class WaypointVisualiser:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(1.0)
                 s.connect((self.host, self.port))
-                s.recv(1024)
                 s.sendall((cmd + '\r\n').encode('utf-8'))
                 response = s.recv(1024).decode('utf-8').strip()
                 print(f"Sent: {cmd} | FG Response: {response}")
@@ -403,8 +402,8 @@ class WaypointVisualiser:
             # Send the properties to FlightGear to spawn the object
             commands = [
                 f"set {prefix}/path {self.model_path}",
-                f"set {prefix}/latitude-deg-m {lat}",
-                f"set {prefix}/longitude-deg-m {lon}",
+                f"set {prefix}/latitude-deg {lat}",
+                f"set {prefix}/longitude-deg {lon}",
                 f"set {prefix}/elevation-ft {alt}",
                 f"set {prefix}/pitch-deg 0",
                 f"set {prefix}/roll-deg 0",
@@ -437,11 +436,21 @@ class WaypointVisualiser:
         )
         # Subprocess is not used with context manager because it needs to persist
         # And is managed manually via close() method
+        import os
+
+        # copy the current environment variables
+        clean_env = os.environ.copy()
+
+        # remove the Qt and library paths that might confuse the AppImage
+        clean_env.pop("QT_PLUGIN_PATH", None)
+        clean_env.pop("LD_LIBRARY_PATH", None)
+        clean_env.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
 
         flightgear_process = subprocess.Popen(
             cmd_line_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            env=clean_env,
         )
         return flightgear_process
 

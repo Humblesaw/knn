@@ -67,6 +67,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Watch a trained agent fly in FlightGear.")
     parser.add_argument("--resume", type=str, required=True,
                         help="Path to the checkpoint .zip file you want to watch.")
+    parser.add_argument("--waypoint_model", type=str, default="../fg_stuff/sphere10m.xml",
+                        help="Path to the model used as waypoint visualization.")
     parser.add_argument("--diff", type=float, default=0.0,
                         help="Difficulty of the generated route (0.0 to 1.0). Default: 0.0")
     parser.add_argument("--episodes", type=int, default=3,
@@ -86,7 +88,7 @@ if __name__ == "__main__":
     
     # Initialize JSBSim before starting the visualizer
     obs, info = env.reset()
-    vis = WaypointVisualiser(raw_env.sim)
+    vis = WaypointVisualiser(raw_env.sim, args.waypoint_model)
 
     # --- MAIN REPLAY LOOP ---
     for episode in range(args.episodes): 
@@ -122,7 +124,7 @@ if __name__ == "__main__":
                 flight_line.set_data(flight_lons, flight_lats)
                 flight_line.set_3d_properties(flight_alts)
                 fig.canvas.draw()
-                fig.canvas.flush_events()
+            fig.canvas.flush_events()
                 
             step_counter += 1
 

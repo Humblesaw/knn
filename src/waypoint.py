@@ -28,13 +28,13 @@ class MinMaxObservationWrapper(gym.ObservationWrapper):
         super().__init__(env)
 
     def observation(self, obs):
-        # Normalize to [0, 1]
+        # normalize to [0, 1]
         obs_range = (self.observation_space.high - self.observation_space.low)
         obs_range[obs_range == 0] = 1e-10
 
         norm = (obs - self.observation_space.low) / obs_range
         
-        # Clip to ensure no out-of-bounds values (FlightGear can sometimes spit out anomalies)
+        # clip to ensure no out-of-bounds values (FlightGear can sometimes spit out anomalies)
         return np.clip(norm, 0, 1)
 
 class Reward:
@@ -53,15 +53,15 @@ class WaypointAssessor(Assessor):
         self.hit_bonus = hit_bonus
         
         # --- BELL CURVE PARAMETERS ---
-        self.base_multiplier = 0.01  # Tiny reward when far away
-        self.peak_multiplier = 0.20  # Massive reward spike when close
-        self.spread_ft = 2000.0      # How wide the bell curve is (starts pulling hard at 2000ft)
+        self.base_multiplier = 0.01  # tiny reward when far away
+        self.peak_multiplier = 0.20  # massive reward spike when close
+        self.spread_ft = 2000.0      # how wide the bell curve is (starts pulling hard at 2000ft)
 
     def assess(self, state: Tuple, last_state: Tuple, is_terminal: bool) -> Reward:
         if last_state is None:
             return Reward(0.0, 0.0)
 
-        # Grab the custom variables from the state array
+        # grab the custom variables from the state array
         base_idx = len(FlightTask.base_state_variables)
         current_dist = state[base_idx]
         last_dist = last_state[base_idx]
@@ -70,22 +70,22 @@ class WaypointAssessor(Assessor):
         current_elev_err = state[base_idx + 2]
 
         # --- THE BELL CURVE MATH ---
-        # 1. Calculate where we are on the curve: e^(-(distance^2) / (2 * spread^2))
-        # This outputs 1.0 if distance is 0, and approaches 0.0 as distance grows.
+        # calculate where we are on the curve: e^(-(distance^2) / (2 * spread^2))
+        # this outputs 1.0 if distance is 0, and approaches 0.0 as distance grows.
         bell_curve_value = math.exp(-(current_dist**2) / (2 * (self.spread_ft**2)))
         
-        # 2. Calculate the dynamic multiplier for this exact frame
+        # calculate the dynamic multiplier for this exact frame
         dynamic_multiplier = self.base_multiplier + (self.peak_multiplier * bell_curve_value)
 
-        # 3. Apply the dynamic multiplier to the distance covered
+        # apply the dynamic multiplier to the distance covered
         delta_dist = last_dist - current_dist
         step_reward = delta_dist * dynamic_multiplier
         
         # --- PENALTIES ---
-        # TIME PENALTY: Lose points every step to stop infinite circling
+        # TIME PENALTY: lose points every step to stop infinite circling
         step_reward -= 0.5
         
-        # ALIGNMENT PENALTY: Lose points if the nose isn't pointing at the waypoint
+        # ALIGNMENT PENALTY: lose points if the nose isn't pointing at the waypoint
         alignment_penalty = (abs(current_heading_err) + abs(current_elev_err)) * 0.5
         step_reward -= alignment_penalty
 
@@ -116,7 +116,7 @@ class WaypointTask(FlightTask):
                 aircraft: Aircraft,
                 assessor: WaypointAssessor,
                 waypoints: List[Tuple[float, float, float]],
-                hit_radius_ft: float = 400.0,
+                hit_radius_ft: float = 32.8,
                 max_steps: int = 1000,
                 debug: bool = False):
     
@@ -160,15 +160,15 @@ class WaypointTask(FlightTask):
         """Reset waypoint list on new episode."""
         super()._new_episode_init(sim)
         
-        # Set standard engine controls
+        # set standard engine controls
         sim.set_throttle_mixture_controls(constants.THROTTLE_CMD, constants.MIXTURE_CMD)
         
         # --- THE FIX: Pre-trim the nose down ---
-        # This counteracts the massive lift generated at cruise speed, 
+        # this counteracts the massive lift generated at cruise speed, 
         # allowing the agent's neutral (0.0) stick output to fly perfectly level!
         sim.jsbsim["fcs/pitch-trim-cmd-norm"] = -0.15
         
-        # Generate dynamic route based on current position
+        # generate dynamic route based on current position
         generator = waypointsgen.RouteGenerator(
             start_lat=sim[prp.lat_geod_deg], 
             start_lon=sim[prp.lng_geoc_deg], 
@@ -178,7 +178,7 @@ class WaypointTask(FlightTask):
         
         current_difficulty = getattr(self, 'curriculum_difficulty', 0.0) 
         
-        self.original_waypoints = generator.generate_route(num_waypoints=3, difficulty=current_difficulty)
+        self.original_waypoints = generator.generate_route(num_waypoints=10, difficulty=current_difficulty)
         self.active_waypoints = self.original_waypoints.copy()
         
         self.waypoints_cleared = 0
@@ -193,13 +193,13 @@ class WaypointTask(FlightTask):
         self.just_hit_waypoint = False
 
         if not self.active_waypoints:
-            # No waypoints left, lock properties to 0
+            # no waypoints left, lock properties to 0
             sim[self.custom_wp_dist] = 0.0
             sim[self.custom_wp_heading_err] = 0.0
             sim[self.custom_wp_elev_err] = 0.0
             return
 
-        # 1. Get current aircraft position
+        # get current aircraft position
         lat = sim[prp.lat_geod_deg]
         lon = sim[prp.lng_geoc_deg]
         alt = sim[prp.altitude_sl_ft]
@@ -207,10 +207,10 @@ class WaypointTask(FlightTask):
         heading = math.radians(heading_deg)
         pitch = sim[prp.pitch_rad]
 
-        # 2. Get active waypoint
+        # get active waypoint
         target_lat, target_lon, target_alt = self.active_waypoints[0]
 
-        # 3. Calculate Distance (Using simple Equirectangular approximation for speed)
+        # calculate distance (using simple Equirectangular approximation for speed)
         # 1 degree of latitude is roughly 364,000 feet.
         lat_dist_ft = (target_lat - lat) * 364000.0
         lon_dist_ft = (target_lon - lon) * (math.cos(math.radians(lat)) * 364000.0)
@@ -219,33 +219,33 @@ class WaypointTask(FlightTask):
         # 3D Distance
         dist_ft = math.sqrt(lat_dist_ft**2 + lon_dist_ft**2 + alt_dist_ft**2)
         
-        # 4. Check for Waypoint Hit
+        # check for waypoint hit
         if dist_ft < self.hit_radius_ft:
             self.active_waypoints.pop(0)
             self.waypoints_cleared += 1
             self.just_hit_waypoint = True
             
-            # Recalculate immediately if there is a next waypoint
+            # recalculate immediately if there is a next waypoint
             if self.active_waypoints:
                 return self._update_custom_properties(sim)
             else:
                 dist_ft = 0.0
 
-        # 5. Calculate Relative Heading (Yaw Error)
+        # calculate relative heading (yaw error)
         # math.atan2(y, x) -> y is longitude difference, x is latitude difference
         target_bearing_rad = math.atan2(lon_dist_ft + 1e-10, lat_dist_ft + 1e-10)
         heading_error = target_bearing_rad - heading
         
-        # Normalize to [-pi, pi]
+        # normalize to [-pi, pi]
         heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
 
-        # 6. Calculate Relative Elevation (Pitch Error)
-        # Ground distance
+        # calculate relative elevation (pitch error)
+        # ground distance
         ground_dist_ft = math.sqrt(lat_dist_ft**2 + lon_dist_ft**2)
         target_pitch_rad = math.atan2(alt_dist_ft, ground_dist_ft)
         pitch_error = target_pitch_rad - pitch
 
-        # 7. Write to Simulation
+        # write to sim
         sim[self.custom_wp_dist] = dist_ft
         sim[self.custom_wp_heading_err] = heading_error
         sim[self.custom_wp_elev_err] = pitch_error
@@ -253,21 +253,21 @@ class WaypointTask(FlightTask):
     def _is_terminal(self, sim: 'Simulation') -> bool:
         """Episode ends if all waypoints are hit, plane crashes, or it flies out of bounds."""
         if not self.active_waypoints:
-            return True # Success!
+            return True
             
         alt = sim[prp.altitude_sl_ft]
         if alt <= 0.0:
-            return True # Crashed
+            return True
 
         roll_rad = abs(sim[prp.roll_rad])
         pitch_rad = abs(sim[prp.pitch_rad])
         
-        # Spinning out of control
+        # spinning out of control
         if roll_rad > 0.5 or pitch_rad > 0.5:
             return True
             
-        # NEW: Out of Bounds Check
-        # Waypoints spawn ~10,000 ft away. If it gets 25,000 ft away, it is flying in the wrong direction.
+        # NEW: out of bounds check
+        # waypoints spawn ~10,000 ft away, if it gets 25,000ft away, it is flying in the wrong direction
         dist_ft = sim[self.custom_wp_dist]
         if dist_ft > 25000.0:
             return True
@@ -278,15 +278,15 @@ class WaypointTask(FlightTask):
         """Apply sparse rewards for hits, completion, failure, or flying away."""
         agent_rew = reward.agent_reward()
         
-        # Penalty for hitting the ground OR losing control
+        # penalty for hitting the ground OR losing control
         if sim[prp.altitude_sl_ft] <= 0.0 or abs(sim[prp.roll_rad]) > 0.5 or abs(sim[prp.pitch_rad]) > 0.5:
             agent_rew -= 1000.0
             
-        # NEW: Penalty for flying out of bounds
+        # NEW: penalty for flying out of bounds
         elif sim[self.custom_wp_dist] > 25000.0:
             agent_rew -= 1000.0
             
-        # Massive bonus for clearing the whole course
+        # massive bonus for clearing the whole course
         elif not self.active_waypoints:
             agent_rew += 2000.0
 
@@ -299,23 +299,23 @@ class WaypointTask(FlightTask):
         # action[0] = aileron, action[1] = elevator, action[2] = rudder
         modified_action = list(action)
         
-        # Push the stick forward by 15% to counteract cruise lift
+        # push the stick forward by 15% to counteract cruise lift
         modified_action[1] -= 0.15 
         
-        # Clamp it to make sure we don't accidentally send a value outside [-1.0, 1.0]
+        # clamp it to make sure we don't accidentally send a value outside [-1.0, 1.0]
         modified_action[1] = max(-1.0, min(1.0, modified_action[1]))
         
-        # Pass our modified, level-flying action to the physics engine instead
+        # pass our modified, level-flying action to the physics engine instead
         state, reward, terminated, truncated, info = super().task_step(sim, modified_action, sim_steps)
         
-        # If we just popped a waypoint during _update_custom_properties, add the sparse bonus
+        # if we just popped a waypoint during _update_custom_properties, add the sparse bonus
         if self.just_hit_waypoint:
             reward += self.assessor.hit_bonus
             info["waypoint_hit"] = True
             
         info["waypoints_remaining"] = len(self.active_waypoints)
 
-        # Early Stopping Logic
+        # early stopping logic
         self.current_step += 1
         if self.current_step >= self.max_steps:
             truncated = True
@@ -325,8 +325,8 @@ class WaypointTask(FlightTask):
         # --- DEBUG START ---
         if any(math.isnan(v) or math.isinf(v) for v in state_values):
             print("!!! NaN/Inf detected in State !!!")
-            # Severe penalty for "disintegrating" the aircraft
-            reward = -2000.0 
+            # severe penalty for "disintegrating" the aircraft
+            reward = -20000.0
             terminated = True
             info["physics_crash"] = True
             
@@ -365,8 +365,8 @@ class WaypointVisualiser:
         self.configure_simulation_output(sim)
         # self.print_props = print_props
         # Note: subprocess is managed manually (not with context manager)
-        # Because it needs to stay alive for the visualiser's lifetime
-        # And is explicitly closed in close() method
+        # because it needs to stay alive for the visualiser's lifetime
+        # and is explicitly closed in close() method
         self.flightgear_process = self._launch_flightgear(sim.get_aircraft())
         # self.figure = FigureVisualiser(sim, print_props)
         if block_until_loaded:
@@ -387,38 +387,35 @@ class WaypointVisualiser:
                 response = s.recv(1024).decode('utf-8').strip()
                 print(f"Sent: {cmd} | FG Response: {response}")
         except Exception as e:
-            # FlightGear might not be running yet, which is fine during training
+            # flightgear might not be running yet, which is fine during training
             print(f"Error: {e}")
 
     def draw_waypoints(self, waypoints):
         """Injects 3D models into FlightGear at the waypoint coordinates."""
-        # We start at index 100 to avoid overwriting default FG models
+        # we start at index 100 to avoid overwriting default FG models
         base_idx = 100 
         
         for i, (lat, lon, alt) in enumerate(waypoints):
             model_idx = base_idx + i
             prefix = f"/models/model[{model_idx}]"
             
-            # Send the properties to FlightGear to spawn the object
+            # send the properties to flightgear to spawn the object
             commands = [
                 f"set {prefix}/path {self.model_path}",
                 f"set {prefix}/latitude-deg {lat}",
                 f"set {prefix}/longitude-deg {lon}",
                 f"set {prefix}/elevation-ft {alt}",
-                f"set {prefix}/pitch-deg 0",
-                f"set {prefix}/roll-deg 0",
-                f"set {prefix}/heading-deg 0",
-                f"set {prefix}/load 1"  # This tells FG to actually render it
+                f"set {prefix}/load 1" # render
             ]
             
             for cmd in commands:
                 self.send_command(cmd)
 
-    def clear_waypoints(self, num_waypoints):
+    def clear_waypoints(self, waypoint_idxs):
         """Removes the models from the sky."""
         base_idx = 100
-        for i in range(num_waypoints):
-            # Unloading the model removes it from the screen
+        for i in waypoint_idxs:
+            # unloading the model removes it from the screen
             self.send_command(f"set /models/model[{base_idx + i}]/load 0")
 
     def plot(self, sim: Simulation) -> None:
@@ -434,8 +431,8 @@ class WaypointVisualiser:
         cmd_line_args = WaypointVisualiser._create_cmd_line_args(
             aircraft.flightgear_id
         )
-        # Subprocess is not used with context manager because it needs to persist
-        # And is managed manually via close() method
+        # subprocess is not used with context manager because it needs to persist
+        # and is managed manually via close() method
         import os
 
         # copy the current environment variables
@@ -461,7 +458,7 @@ class WaypointVisualiser:
 
     @staticmethod
     def _create_cmd_line_args(aircraft_id: str):
-        # FlightGear doesn't have a 172X model, use the P instead
+        # flightgear doesn't have a 172X model, use the P instead
         if aircraft_id == "c172x":
             aircraft_id = "c172p"
 

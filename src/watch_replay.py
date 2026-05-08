@@ -12,7 +12,7 @@ from gymnasium.envs.registration import register
 from gymnasium_jsbsim.aircraft import cessna172P
 from gymnasium_jsbsim.tasks import Shaping
 
-# Ensure the FG version of the environment is registered
+# ensure the fg version of the environment is registered
 from train_waypoint import WaypointTaskFactory 
 register(
     id="JSBSim-WaypointTask-Cessna172P-Shaping.STANDARD-FG-v0",
@@ -22,24 +22,24 @@ register(
 
 def setup_live_plot(start_lat, start_lon, start_alt, waypoints, difficulty):
     """Sets up the Matplotlib window for live 3D rendering."""
-    plt.ion()  # Turn on interactive mode
+    plt.ion()  # turn on interactive mode
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection='3d')
     
-    # 1. Extract Target Waypoints
+    # extract target waypoints
     wp_lats = [wp[0] for wp in waypoints]
     wp_lons = [wp[1] for wp in waypoints]
     wp_alts = [wp[2] for wp in waypoints]
     
-    # 2. Draw Target Waypoints
+    # draw target waypoints
     ax.scatter(wp_lons, wp_lats, wp_alts, color='red', s=100, label='Target Waypoints')
     ax.plot(wp_lons, wp_lats, wp_alts, color='red', linestyle='dashed', alpha=0.5)
     ax.scatter([start_lon], [start_lat], [start_alt], color='green', s=100, label='Start')
 
-    # 3. Create the empty flight line that we will update live
+    # create the empty flight line that we will update live
     flight_line, = ax.plot([], [], [], label='Live Flight Path', color='blue', linewidth=2)
 
-    # 4. Lock the Axis Limits
+    # lock the axis limits
     all_lats = wp_lats + [start_lat]
     all_lons = wp_lons + [start_lon]
     all_alts = wp_alts + [start_alt]
@@ -52,7 +52,7 @@ def setup_live_plot(start_lat, start_lon, start_alt, waypoints, difficulty):
     ax.set_ylim([min(all_lats) - lat_pad, max(all_lats) + lat_pad])
     ax.set_zlim([min(all_alts) - alt_pad, max(all_alts) + alt_pad])
 
-    # Show the current difficulty on the graph title!
+    # show the current difficulty on the graph title
     ax.set_title(f'Live Trajectory Tracking (Difficulty: {difficulty})')
     ax.set_xlabel('Longitude')
     ax.set_ylabel('Latitude')
@@ -83,10 +83,10 @@ if __name__ == "__main__":
 
     raw_env = env.unwrapped
     
-    # Set the difficulty based on your CLI input!
+    # set the difficulty based on your CLI input
     raw_env.task.curriculum_difficulty = args.diff
     
-    # Initialize JSBSim before starting the visualizer
+    # initialize JSBSim before starting the visualizer
     obs, info = env.reset()
     vis = WaypointVisualiser(raw_env.sim, args.waypoint_model)
 
@@ -94,13 +94,14 @@ if __name__ == "__main__":
     for episode in range(args.episodes): 
         target_waypoints = raw_env.task.original_waypoints.copy()
         vis.draw_waypoints(target_waypoints)
+        still_active = len(target_waypoints)
 
-        # Get Starting Position
+        # get Starting Position
         start_lat = raw_env.sim[prp.lat_geod_deg]
         start_lon = raw_env.sim[prp.lng_geoc_deg]
         start_alt = raw_env.sim[prp.altitude_sl_ft]
 
-        # Setup the Live Plot (passing the difficulty)
+        # setup the Live Plot (passing the difficulty)
         fig, ax, flight_line = setup_live_plot(start_lat, start_lon, start_alt, target_waypoints, args.diff)
 
         flight_lats, flight_lons, flight_alts = [], [], []
@@ -114,10 +115,15 @@ if __name__ == "__main__":
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             
-            # Record coordinates
+            # record coordinates
             flight_lats.append(raw_env.sim[prp.lat_geod_deg])
             flight_lons.append(raw_env.sim[prp.lng_geoc_deg])
             flight_alts.append(raw_env.sim[prp.altitude_sl_ft])
+
+            # show when the waypoint is cleared
+            if len(raw_env.task.active_waypoints) != still_active:
+                print("Waypoint cleared")
+                still_active = len(raw_env.task.active_waypoints)
 
             # LIVE UPDATE LOGIC
             if step_counter % 10 == 0:
@@ -131,9 +137,9 @@ if __name__ == "__main__":
         print("Episode finished! Waiting 3 seconds before next flight...")
         plt.pause(3.0) 
         plt.close(fig) 
-        vis.clear_waypoints(len(target_waypoints))
+        vis.clear_waypoints(range(len(target_waypoints)))
         
-        # Reset the environment for the next episode
+        # reset the environment for the next episode
         obs, info = env.reset()
 
     env.close()

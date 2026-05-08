@@ -35,17 +35,17 @@ class SuccessBasedCurriculumCallback(BaseCallback):
         self.current_difficulty = 0.0
 
     def _on_step(self) -> bool:
-        # We only want to evaluate and change difficulty at the END of an episode
+        # we only want to evaluate and change difficulty at the END of an episode
         if "dones" in self.locals and self.locals["dones"][0]:
             if len(self.model.ep_info_buffer) > 20:
                 mean_reward = np.mean([ep_info["r"] for ep_info in self.model.ep_info_buffer])
                 
-                # Lowered from 700 to 350
-                if mean_reward > 350.0:
-                    self.current_difficulty = min(1.0, self.current_difficulty + 0.01)
-                # Raised the failure floor slightly
-                elif mean_reward < 100.0:
-                    self.current_difficulty = max(0.0, self.current_difficulty - 0.02)
+                # # lowered from 700 to 350
+                # if mean_reward > 350.0:
+                #     self.current_difficulty = min(1.0, self.current_difficulty + 0.01)
+                # # raised the failure floor slightly
+                # elif mean_reward < 100.0:
+                #     self.current_difficulty = max(0.0, self.current_difficulty - 0.02)
 
             for env in self.training_env.envs:
                 env.unwrapped.task.curriculum_difficulty = self.current_difficulty
@@ -54,10 +54,10 @@ class SuccessBasedCurriculumCallback(BaseCallback):
             
         return True
 
-import argparse # Add this to your imports at the top if it isn't there!
+import argparse
 
 if __name__ == "__main__":
-    # 1. Set up the Argument Parser
+    # set up the argument parser
     parser = argparse.ArgumentParser(description="Train a PPO agent for JSBSim Waypoint Navigation.")
     
     parser.add_argument("--resume", type=str, default=None,
@@ -69,13 +69,13 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    # 2. Initialize Environment
+    # initialize environment
     env = MinMaxObservationWrapper(gym.make("JSBSim-WaypointTask-Cessna172P-Shaping.STANDARD-NoFG-v0"))
     
     curriculum_callback = SuccessBasedCurriculumCallback()
     curriculum_callback.current_difficulty = args.diff
 
-    # 3. Branching Logic based on CLI arguments
+    # branching logic based on CLI arguments
     if args.resume:
         print(f"--- RESUMING TRAINING FROM: {args.resume} ---")
         model = PPO.load(
@@ -92,7 +92,7 @@ if __name__ == "__main__":
         reset_timesteps = True
         save_prefix = "flight_model"
 
-    # 4. Callbacks & Execution
+    # callbacks & execution
     checkpoint_callback = CheckpointCallback(
         save_freq=50000,
         save_path="../models/checkpoints/",

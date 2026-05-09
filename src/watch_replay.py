@@ -3,7 +3,7 @@ import gymnasium as gym
 import gymnasium_jsbsim  # noqa: F401
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 import numpy as np
 
 import gymnasium_jsbsim.properties as prp
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     env = MinMaxObservationWrapper(gym.make("JSBSim-WaypointTask-Cessna172P-Shaping.STANDARD-FG-v0"))
 
     print(f"Loading model from {args.resume}...")
-    model = PPO.load(args.resume, env=env)
+    model = SAC.load(args.resume, env=env)
 
     raw_env = env.unwrapped
     

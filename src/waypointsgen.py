@@ -28,13 +28,14 @@ class RouteGenerator:
 
         # Difficulty scalers
         # Easy: waypoints are far apart (time to react), Hard: closer together
-        base_dist_ft = 5000.0 - (difficulty * 2500.0) 
+        # Easy: waypoints are 5000 ft apart. Hard: 3000 ft apart.
+        base_dist_ft = 5000.0 - (difficulty * 2000.0)
         
         # Easy: 0 deg turns, Hard: up to 30 deg turns
-        max_turn_rad = math.radians(30.0 * difficulty)
+        max_turn_rad = math.radians(20.0 * difficulty)
         
         # Easy: 0 ft alt change, Hard: up to 1000 ft alt change per waypoint
-        max_alt_change_ft = 1000.0 * difficulty
+        max_alt_change_ft = 100.0 * difficulty
 
         for _ in range(num_waypoints):
             # 1. Determine distance to next waypoint

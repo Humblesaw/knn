@@ -1,7 +1,7 @@
 import gymnasium as gym
 import gymnasium_jsbsim  # noqa: F401
 import numpy as np
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback, CallbackList
 
 from gymnasium.envs.registration import register
@@ -78,19 +78,21 @@ if __name__ == "__main__":
     # 3. Branching Logic based on CLI arguments
     if args.resume:
         print(f"--- RESUMING TRAINING FROM: {args.resume} ---")
-        model = PPO.load(
+        # Swapped to SAC!
+        model = SAC.load(
             args.resume, 
             env=env, 
-            tensorboard_log="../logs/ppo",
-            custom_objects={"learning_rate": 1e-4} 
+            tensorboard_log="../logs/sac", # Changed log folder
+            custom_objects={"learning_rate": 3e-4} 
         )
         reset_timesteps = False
-        save_prefix = "resumed_flight_model"
+        save_prefix = "resumed_flight_model_sac"
     else:
         print("--- STARTING FRESH TRAINING RUN ---")
-        model = PPO("MlpPolicy", env, tensorboard_log="../logs/ppo", learning_rate=1e-4, device='cpu')
+        # Swapped to SAC! SAC usually prefers a slightly higher learning rate.
+        model = SAC("MlpPolicy", env, tensorboard_log="../logs/sac", learning_rate=3e-4, device='cpu')
         reset_timesteps = True
-        save_prefix = "flight_model"
+        save_prefix = "flight_model_sac"
 
     # 4. Callbacks & Execution
     checkpoint_callback = CheckpointCallback(

@@ -26,16 +26,25 @@ import waypointsgen
 class MinMaxObservationWrapper(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
+        self.dist_idx = len(FlightTask.base_state_variables)
+        self.head_idx = len(FlightTask.base_state_variables) + 1
+        self.elev_idx = len(FlightTask.base_state_variables) + 2
 
     def observation(self, obs):
         # normalize to [0, 1]
         obs_range = (self.observation_space.high - self.observation_space.low)
         obs_range[obs_range == 0] = 1e-10
-
         norm = (obs - self.observation_space.low) / obs_range
-        
+
         # clip to ensure no out-of-bounds values (FlightGear can sometimes spit out anomalies)
-        return np.clip(norm, 0, 1)
+        norm = np.clip(norm, 0, 1)
+
+        # keep the errors though
+        norm[self.dist_idx] = obs[self.dist_idx]
+        norm[self.head_idx] = obs[self.head_idx]
+        norm[self.elev_idx] = obs[self.elev_idx]
+
+        return norm
 
 class Reward:
     """Simple wrapper for rewards expected by FlightTask"""
